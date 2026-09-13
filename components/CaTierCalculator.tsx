@@ -13,8 +13,12 @@ interface CAData {
   type: string;
   description: string;
   comp: number;
-  custom_score: number;
-  price: number;
+  custom_score: number | null;
+  price: number | null;
+  requirements?: {
+    skills?: Array<{ skill: string; level: number }>;
+    team_members?: { min?: number; max?: number; exact?: number };
+  };
 }
 
 interface WikiData {
@@ -23,6 +27,19 @@ interface WikiData {
 }
 
 const caData = caDataRaw as CAData[];
+
+function isTeamTask(ca: CAData): boolean {
+  const tm = ca.requirements?.team_members;
+  if (!tm) return false;
+  return (
+    (typeof tm.min === "number" && tm.min > 1) ||
+    (typeof tm.max === "number" && tm.max > 1) ||
+    (typeof tm.exact === "number" && tm.exact > 1)
+  );
+}
+
+const teamTasks = caData.filter(isTeamTask);
+const teamTaskIds = new Set(teamTasks.map((t) => t.wiki_ca_id));
 
 const TiersCA: Record<string, number> = Object.freeze({
   EASY: 41,
@@ -139,6 +156,7 @@ export default function CaTierCalculator() {
   const [tierFilter, setTierFilter] = useState("ALL");
   const [sortKey, setSortKey] = useState("custom_score");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [mode, setMode] = useState<"suggested" | "no-do">("suggested");
 
   useEffect(() => {
     if (hasResult) {
@@ -157,7 +175,9 @@ export default function CaTierCalculator() {
     const targetPts = TiersCA[tierKey] ?? TiersCA.MASTER;
     const missing = Math.max(0, targetPts - pts);
 
-    const sortedIncomplete = [...incomplete].sort((a, b) => b.custom_score - a.custom_score);
+    const sortedIncomplete = incomplete
+      .filter((ca) => !teamTaskIds.has(ca.wiki_ca_id))
+      .sort((a, b) => (b.custom_score ?? 0) - (a.custom_score ?? 0));
     let ptsAcc = 0;
     let price = 0;
     const nextSuggested: CAData[] = [];
@@ -165,7 +185,7 @@ export default function CaTierCalculator() {
     for (const ca of sortedIncomplete) {
       if (ptsAcc >= missing && missing > 0) break;
       ptsAcc += ca.pts;
-      price += ca.price;
+      price += ca.price ?? 0;
       nextSuggested.push(ca);
     }
 
@@ -234,6 +254,7 @@ export default function CaTierCalculator() {
 
       setSortKey("custom_score");
       setSortDir("desc");
+      setMode("suggested");
       setHasResult(true);
     } catch (err) {
       console.error("Error fetching CA tier data:", err);
@@ -250,7 +271,9 @@ export default function CaTierCalculator() {
   const filtered = useMemo(() => {
     if (!hasResult) return [];
 
-    const list = suggestedTasks.filter((task) => {
+    const source = mode === "no-do" ? teamTasks : suggestedTasks;
+
+    const list = source.filter((task) => {
       if (tierFilter !== "ALL" && task.tier.toUpperCase() !== tierFilter) return false;
       if (search) {
         const q = search.toLowerCase();
@@ -277,9 +300,14 @@ export default function CaTierCalculator() {
       if (typeof va === "number" && typeof vb === "number") {
         return (va - vb) * dir;
       }
+      if (sortKey === "price" || sortKey === "custom_score") {
+        return (((va as number | null) ?? 0) - ((vb as number | null) ?? 0)) * dir;
+      }
       return String(va ?? "").localeCompare(String(vb ?? "")) * dir;
     });
-  }, [hasResult, suggestedTasks, tierFilter, search, sortKey, sortDir]);
+  }, [hasResult, mode, suggestedTasks, tierFilter, search, sortKey, sortDir]);
+
+  const listTotal = mode === "no-do" ? teamTasks.length : suggestedTasks.length;
 
   const handleSort = (key: string) => {
     if (sortKey === key) {
@@ -402,32 +430,35 @@ export default function CaTierCalculator() {
               <span className="kpi-footer-text">Tier actual según puntos completados</span>
             </div>
 
-            <div className="kpi-card">
-              <div className="kpi-header">
-                <span className="kpi-label">Progreso Actual</span>
-                <span className="kpi-icon">🎯</span>
-              </div>
-              <div className="kpi-value-row">
-                <span className="kpi-value">{completedPts.toLocaleString()}</span>
-                <span className="kpi-subvalue">
-                  {`/ ${targetTierPts.toLocaleString()} PTS (${targetTier})`}
-                </span>
-              </div>
-              <div className="progress-bar-bg">
-                <div className="progress-bar-fill" style={{ width: `${progressPercent}%` }}></div>
-              </div>
-            </div>
-
-            <div className="kpi-card">
+            <div className="kpi-card kpi-card-target">
               <div className="kpi-header">
                 <span className="kpi-label">Puntos Faltantes</span>
-                <span className="kpi-icon">⚡</span>
+                <Image
+                  className="kpi-target-hilt"
+                  src={TIER_IMAGES[targetTier] ?? TIER_IMAGES.GRANDMASTER}
+                  alt={`Ghommal hilt de tier ${targetTier}`}
+                  width={44}
+                  height={44}
+                />
               </div>
               <div className="kpi-value-row">
                 <span className="kpi-value highlight-red">{missingPts.toLocaleString()}</span>
                 <span className="kpi-subvalue">PTS</span>
               </div>
-              <span className="kpi-footer-text">Para alcanzar el tier objetivo</span>
+              <div className="progress-bar-bg">
+                <div className="progress-bar-fill" style={{ width: `${progressPercent}%` }}></div>
+              </div>
+              {missingPts > 0 ? (
+                <span className="kpi-missing-warning">
+                  ⚠️ Te faltan {missingPts.toLocaleString()} PTS para alcanzar {targetTier}
+                </span>
+              ) : (
+                <span className="kpi-missing-ok">✅ Tier {targetTier} alcanzado</span>
+              )}
+              <span className="kpi-footer-text">
+                {completedPts.toLocaleString()} / {targetTierPts.toLocaleString()} PTS completados
+                {suggestedTasks.length > 0 && ` · ${suggestedTasks.length} tareas sugeridas`}
+              </span>
             </div>
 
             <div className="kpi-card">
@@ -467,6 +498,23 @@ export default function CaTierCalculator() {
                     placeholder="Buscar por tarea, boss o descripción..."
                   />
                 </div>
+
+                <div className="mode-tabs">
+                  <button
+                    type="button"
+                    className={`mode-tab ${mode === "suggested" ? "active" : ""}`}
+                    onClick={() => setMode("suggested")}
+                  >
+                    Sugeridas
+                  </button>
+                  <button
+                    type="button"
+                    className={`mode-tab ${mode === "no-do" ? "active" : ""}`}
+                    onClick={() => setMode("no-do")}
+                  >
+                    No hago
+                  </button>
+                </div>
               </div>
 
               <div className="tier-filters">
@@ -486,7 +534,7 @@ export default function CaTierCalculator() {
               <div className="counter-bar">
                 <span>
                   Mostrando <strong>{filtered.length.toLocaleString()}</strong> de{" "}
-                  <strong>{suggestedTasks.length.toLocaleString()}</strong> tareas
+                  <strong>{listTotal.toLocaleString()}</strong> tareas
                 </span>
               </div>
             </div>
@@ -535,9 +583,15 @@ export default function CaTierCalculator() {
                             <p className="desc-text">{ca.description}</p>
                           </td>
                           <td className="col-price">
-                            <span className={`price-pill ${ca.price > 0 ? "has-price" : "free"}`}>
-                              {formatPrice(ca.price)}
-                            </span>
+                            {mode === "no-do" || ca.price == null ? (
+                              <span className="price-pill no-price">—</span>
+                            ) : (
+                              <span
+                                className={`price-pill ${ca.price > 0 ? "has-price" : "free"}`}
+                              >
+                                {formatPrice(ca.price)}
+                              </span>
+                            )}
                           </td>
                         </tr>
                       );
