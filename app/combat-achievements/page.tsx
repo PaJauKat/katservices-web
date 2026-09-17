@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { services, initCatalog } from "@/lib/services";
 import CombatAchievementsViewer from "@/components/CombatAchievementsViewer";
+import KillCountLookup from "@/components/KillCountLookup";
 import { STORE } from "@/lib/config";
 
 export const metadata: Metadata = {
@@ -26,13 +26,7 @@ export default async function CombatAchievementsPage() {
           {services.length} services across all monsters. Search, filter by boss and add tasks
           straight to your cart.
         </p>
-        <Link
-          href="/ca-tier-calculator"
-          className="btn btn-secondary"
-          style={{ marginTop: 14 }}
-        >
-          🧮 Calculadora de tiers: tu progreso y puntos faltantes
-        </Link>
+        <KillCountLookup />
       </div>
 
       <CombatAchievementsViewer items={services} />

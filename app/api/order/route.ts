@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { CHECKOUT, STORE } from "@/lib/config";
 import { services, formatIntPrice, initCatalog } from "@/lib/services";
+import { computeCartBreakdown } from "@/lib/pricing";
 import type { CartEntry } from "@/lib/types";
 
 function genOrderId(): string {
@@ -11,7 +12,7 @@ function genOrderId(): string {
 }
 
 interface OrderBody {
-  rsn?: string;
+  discord?: string;
   currency?: string;
   items?: CartEntry[];
 }
@@ -21,7 +22,7 @@ export async function POST(req: Request) {
     await initCatalog();
     const body = (await req.json()) as OrderBody;
     const items = Array.isArray(body.items) ? body.items.slice(0, 50) : [];
-    const rsn = (body.rsn ?? "").trim().slice(0, 12);
+    const discord = (body.discord ?? "").trim().slice(0, 32);
     const currency = (body.currency ?? "GP").toUpperCase();
 
     if (items.length === 0) {
@@ -37,22 +38,46 @@ export async function POST(req: Request) {
       }
     }
 
-    const totalGP = items.reduce((acc, it) => acc + it.intPrice * it.qty, 0);
+    const breakdown = computeCartBreakdown(items);
+    const totalGP = breakdown.totalGP;
     const orderId = genOrderId();
 
-    const lines = items
-      .map((it) => {
-        const metaParts = [it.option, it.content, it.note].filter(Boolean).join(" / ");
-        const meta = metaParts ? ` (${metaParts})` : "";
-        return `- ${it.text}${meta} x${it.qty} — **${formatIntPrice(it.intPrice)} GP**`;
-      })
-      .join("\n");
+    const lines: string[] = [];
+    for (const group of breakdown.groups) {
+      if (group.isGear) {
+        for (const it of group.tasks) {
+          const metaParts = [it.option, it.content, it.note].filter(Boolean).join(" / ");
+          const meta = metaParts ? ` (${metaParts})` : "";
+          lines.push(
+            `- ${it.text}${meta} x${it.qty} — **${formatIntPrice(it.effGP)} GP**`
+          );
+        }
+        continue;
+      }
+      if (group.chargeBase) {
+        lines.push(
+          `**Kill Base - ${group.key}:** ${group.baseGP > 0 ? formatIntPrice(group.baseGP) : "0"} GP`
+        );
+      }
+      for (const it of group.tasks) {
+        const metaParts = [it.content, it.note].filter(Boolean).join(" / ");
+        let meta = metaParts ? ` (${metaParts})` : "";
+        if (it.killsNeeded != null && it.kills != null && group.baseGP > 0) {
+          const need = it.killsNeeded < it.kills
+            ? `${it.killsNeeded}/${it.kills} kills needed`
+            : `${it.kills} kills`;
+          meta += ` [${need}]`;
+        }
+        if (it.coveredBy) meta += ` [incl. with ${it.coveredBy}]`;
+        lines.push(`+ ${it.text}${meta} x${it.qty} — **${formatIntPrice(it.effGP)} GP**`);
+      }
+    }
 
     const description = [
-      `**RSN:** ${rsn || "Not provided"}`,
+      `**Discord:** ${discord || "Not provided"}`,
       `**Display currency:** ${currency}`,
       "",
-      lines,
+      ...lines,
       "",
       `**Total: ${formatIntPrice(totalGP)} GP**`,
     ].join("\n");

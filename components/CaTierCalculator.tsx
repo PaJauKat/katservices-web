@@ -3,6 +3,8 @@
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import caDataRaw from "@/data/final_data.json";
+import { computeCartBreakdown, countTaskPrice, type KillCounts } from "@/lib/pricing";
+import type { CartEntry } from "@/lib/types";
 
 interface CAData {
   wiki_ca_id: number;
@@ -15,6 +17,8 @@ interface CAData {
   comp: number;
   custom_score: number | null;
   price: number | null;
+  kills?: number | null;
+  also_completes?: string[] | null;
   requirements?: {
     skills?: Array<{ skill: string; level: number }>;
     team_members?: { min?: number; max?: number; exact?: number };
@@ -151,12 +155,25 @@ export default function CaTierCalculator() {
   const [targetTierPts, setTargetTierPts] = useState(TiersCA.MASTER);
   const [missingPts, setMissingPts] = useState(TiersCA.MASTER);
   const [totalPrice, setTotalPrice] = useState(0);
+  /** Kills por boss del jugador (OSRS hiscores) para descontar tasks Kill Count. */
+  const [killCounts, setKillCounts] = useState<KillCounts>({});
 
   const [search, setSearch] = useState("");
   const [tierFilter, setTierFilter] = useState("ALL");
   const [sortKey, setSortKey] = useState("custom_score");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [mode, setMode] = useState<"suggested" | "no-do">("suggested");
+
+  /** Precio dinamico (GP) si la task es count con base del boss, si no null. */
+  const dynamicOf = (ca: CAData): number | null =>
+    countTaskPrice(ca.monster, ca.type, ca.kills, killCounts[ca.monster]);
+
+  /** Precio de la fila en millones: dinamico si aplica, si no estatico. */
+  const rowPriceOf = (ca: CAData): number | null => {
+    const dyn = dynamicOf(ca);
+    if (dyn != null) return dyn / 1_000_000;
+    return ca.price;
+  };
 
   useEffect(() => {
     if (hasResult) {
@@ -179,20 +196,34 @@ export default function CaTierCalculator() {
       .filter((ca) => !teamTaskIds.has(ca.wiki_ca_id))
       .sort((a, b) => (b.custom_score ?? 0) - (a.custom_score ?? 0));
     let ptsAcc = 0;
-    let price = 0;
     const nextSuggested: CAData[] = [];
 
     for (const ca of sortedIncomplete) {
       if (ptsAcc >= missing && missing > 0) break;
       ptsAcc += ca.pts;
-      price += ca.price ?? 0;
       nextSuggested.push(ca);
     }
+
+    // El total usa el mismo pricing del carrito: tasks Kill Count / Stamina
+    // con base del boss x kills (descontando hiscore y solapamiento) y la
+    // linea base absorbida en grupos con count tasks.
+    const entries: CartEntry[] = nextSuggested.map((ca) => ({
+      id: String(ca.wiki_ca_id),
+      text: ca.name,
+      option: ca.monster,
+      content: ca.tier,
+      intPrice: Math.round((ca.price ?? 0) * 1_000_000),
+      qty: 1,
+      type: ca.type,
+      kills: ca.kills,
+      alsoCompletes: ca.also_completes,
+    }));
+    const priceGP = computeCartBreakdown(entries, killCounts).totalGP;
 
     setSuggestedTasks(nextSuggested);
     setTargetTierPts(targetPts);
     setMissingPts(missing);
-    setTotalPrice(price);
+    setTotalPrice(priceGP / 1_000_000);
   }
 
   const onTargetChange = (value: string) => {
@@ -211,17 +242,30 @@ export default function CaTierCalculator() {
     setError(null);
 
     try {
-      const params = new URLSearchParams({ username: rsnValue });
-      const resp = await fetch(`/api/ca-tier?${params.toString()}`);
+      const [syncRes, hisRes] = await Promise.all([
+        fetch(`/api/ca-tier?${new URLSearchParams({ username: rsnValue }).toString()}`),
+        fetch(`/api/hiscores?${new URLSearchParams({ user: rsnValue }).toString()}`),
+      ]);
 
-      if (!resp.ok) {
-        const errData = (await resp.json().catch(() => ({}))) as { error?: string };
+      if (!syncRes.ok) {
+        const errData = (await syncRes.json().catch(() => ({}))) as { error?: string };
         throw new Error(
-          errData.error || `No se pudo encontrar al jugador '${rsnValue}'. (Status ${resp.status})`
+          errData.error ||
+            `No se pudo encontrar al jugador '${rsnValue}'. (Status ${syncRes.status})`
         );
       }
 
-      const data = (await resp.json()) as WikiData;
+      const data = (await syncRes.json()) as WikiData;
+      let kills: KillCounts = {};
+      if (hisRes.ok) {
+        try {
+          const hd = (await hisRes.json()) as { kills?: KillCounts };
+          kills = hd.kills ?? {};
+        } catch {
+          /* sin hiscore: precio full */
+        }
+      }
+      setKillCounts(kills);
       const completedIds = new Set(data.combat_achievements ?? []);
 
       let pts = 0;
@@ -469,7 +513,7 @@ export default function CaTierCalculator() {
               <div className="kpi-value-row">
                 <span className="kpi-value">{formatPrice(totalPrice)}</span>
               </div>
-              <span className="kpi-footer-text">En suministros / servicios recomendados</span>
+              <span className="kpi-footer-text">En suministros / servicios recomendados · Kill Count y Stamina: base del boss × kills (con tus kills del hiscore descontadas)</span>
             </div>
           </div>
         )}
@@ -560,6 +604,7 @@ export default function CaTierCalculator() {
                   <tbody>
                     {filtered.map((ca) => {
                       const tierClass = ca.tier.toLowerCase();
+                      const rowPrice = rowPriceOf(ca);
                       return (
                         <tr key={ca.wiki_ca_id}>
                           <td className="col-task">
@@ -583,13 +628,18 @@ export default function CaTierCalculator() {
                             <p className="desc-text">{ca.description}</p>
                           </td>
                           <td className="col-price">
-                            {mode === "no-do" || ca.price == null ? (
+                            {mode === "no-do" || rowPrice == null ? (
                               <span className="price-pill no-price">—</span>
                             ) : (
                               <span
-                                className={`price-pill ${ca.price > 0 ? "has-price" : "free"}`}
+                                className={`price-pill ${rowPrice > 0 ? "has-price" : "free"}`}
+                                title={
+                                  dynamicOf(ca) != null
+                                    ? "Base del boss x kills (con tus kills del hiscore)"
+                                    : undefined
+                                }
                               >
-                                {formatPrice(ca.price)}
+                                {formatPrice(rowPrice)}
                               </span>
                             )}
                           </td>

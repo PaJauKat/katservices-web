@@ -12,10 +12,14 @@ import {
 import type { CartEntry, CurrencyCode, ServiceItem } from "@/lib/types";
 import type { GearItem } from "@/data/gear";
 import { fetchLiveRates, type LiveRates } from "@/lib/exchange";
+import { computeCartBreakdown, type CartGroup, type KillCounts } from "@/lib/pricing";
+
+export type KillsStatus = "idle" | "loading" | "done" | "error";
 
 interface ShopState {
   cart: CartEntry[];
-  addToCart: (item: ServiceItem) => void;
+  cartGroups: CartGroup[];
+  addToCart: (item: ServiceItem) => boolean;
   addGearToCart: (item: GearItem, note: string | null, modKey: string, totalGP: number) => void;
   removeFromCart: (id: string) => void;
   updateQty: (id: string, delta: number) => void;
@@ -32,6 +36,16 @@ interface ShopState {
   liveRates: LiveRates;
   ratesLive: boolean;
 
+  /** RSN del cliente (para descontar kills de suscores en tasks Kill Count). */
+  rsn: string;
+  killCounts: KillCounts;
+  /** wiki_ca_id de las tasks que el cliente ya tiene completadas (RuneLite sync). */
+  completedTaskIds: Set<number>;
+  killsStatus: KillsStatus;
+  killsError: string;
+  lookupPlayer: (rsn: string) => Promise<{ ok: boolean; error?: string }>;
+  forgetKills: () => void;
+
   toast: (msg: React.ReactNode) => void;
   toastMsg: React.ReactNode;
 }
@@ -39,6 +53,7 @@ interface ShopState {
 const ShopContext = createContext<ShopState | null>(null);
 
 const CART_KEY = "katservices_cart_v1";
+const RSN_KEY = "katservices_rsn_v1";
 
 function loadCart(): CartEntry[] {
   if (typeof window === "undefined") return [];
@@ -49,6 +64,15 @@ function loadCart(): CartEntry[] {
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
+  }
+}
+
+function loadRsn(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(RSN_KEY) ?? "";
+  } catch {
+    return "";
   }
 }
 
@@ -63,6 +87,12 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
   const [toastMsg, setToastMsg] = useState<React.ReactNode>("");
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const [rsn, setRsnState] = useState("");
+  const [killCounts, setKillCounts] = useState<KillCounts>({});
+  const [completedTaskIds, setCompletedTaskIds] = useState<Set<number>>(new Set());
+  const [killsStatus, setKillsStatus] = useState<KillsStatus>("idle");
+  const [killsError, setKillsError] = useState("");
+
   useEffect(() => {
     setCart(loadCart());
   }, []);
@@ -76,6 +106,84 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
   }, [cart]);
 
   useEffect(() => {
+    try {
+      window.localStorage.setItem(RSN_KEY, rsn);
+    } catch {
+      /* ignore */
+    }
+  }, [rsn]);
+
+  const lookupPlayer = useCallback(
+    async (rsnInput: string): Promise<{ ok: boolean; error?: string }> => {
+      const value = rsnInput.trim();
+      if (!value) {
+        return { ok: false, error: "Enter your RSN first." };
+      }
+      setRsnState(value);
+      setKillsStatus("loading");
+      setKillsError("");
+
+      const [killsRes, syncRes] = await Promise.all([
+        fetch(`/api/hiscores?${new URLSearchParams({ user: value }).toString()}`),
+        fetch(`/api/ca-tier?${new URLSearchParams({ username: value }).toString()}`),
+      ]);
+
+      let killsErrorMsg: string | null = null;
+      let syncErrorMsg: string | null = null;
+      let gotKills = false;
+      let gotSync = false;
+
+      if (killsRes.ok) {
+        const data = (await killsRes.json()) as { kills?: KillCounts };
+        setKillCounts(data.kills ?? {});
+        gotKills = true;
+      } else {
+        const data = (await killsRes.json().catch(() => ({}))) as { error?: string };
+        killsErrorMsg = data.error ?? `Hiscore lookup failed (${killsRes.status}).`;
+      }
+
+      if (syncRes.ok) {
+        const data = (await syncRes.json()) as { combat_achievements?: number[] };
+        setCompletedTaskIds(new Set(data.combat_achievements ?? []));
+        gotSync = true;
+      } else {
+        const data = (await syncRes.json().catch(() => ({}))) as { error?: string };
+        syncErrorMsg = data.error ?? `Progress lookup failed (${syncRes.status}).`;
+      }
+
+      if (!gotKills && !gotSync) {
+        setKillCounts({});
+        setCompletedTaskIds(new Set());
+        setKillsStatus("error");
+        const message = [killsErrorMsg, syncErrorMsg].filter(Boolean).join(" ");
+        setKillsError(message);
+        return { ok: false, error: message };
+      }
+
+      setKillsStatus("done");
+      return { ok: true };
+    },
+    []
+  );
+
+  // Si ya hay un RSN guardado, reconsulta sus datos al volver a la web.
+  useEffect(() => {
+    const saved = loadRsn();
+    if (saved) {
+      void lookupPlayer(saved);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const forgetKills = useCallback(() => {
+    setRsnState("");
+    setKillCounts({});
+    setCompletedTaskIds(new Set());
+    setKillsStatus("idle");
+    setKillsError("");
+  }, []);
+
+  useEffect(() => {
     let active = true;
     fetchLiveRates().then((r) => {
       if (active) setLiveRates(r);
@@ -86,19 +194,30 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const addToCart = useCallback((item: ServiceItem) => {
+    let added = true;
     setCart((prev) => {
       const existing = prev.find((e) => e.id === item.id);
       if (existing) {
-        return prev.map((e) =>
-          e.id === item.id ? { ...e, qty: e.qty + 1 } : e
-        );
+        added = false;
+        return prev;
       }
       return [
         ...prev,
-        { id: item.id, text: item.text, option: item.option, content: item.content, intPrice: item.intPrice, qty: 1 },
+        {
+          id: item.id,
+          text: item.text,
+          option: item.option,
+          content: item.content,
+          intPrice: item.intPrice,
+          qty: 1,
+          type: item.type,
+          kills: item.kills,
+          alsoCompletes: item.alsoCompletes,
+        },
       ];
     });
     setIsCartOpen(false);
+    return added;
   }, []);
 
   const addGearToCart = useCallback(
@@ -119,6 +238,9 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
             intPrice: totalGP,
             qty: 1,
             note,
+            type: "Gear",
+            kills: null,
+            alsoCompletes: null,
           },
         ];
       });
@@ -153,14 +275,14 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const cartCount = useMemo(() => cart.reduce((acc, e) => acc + e.qty, 0), [cart]);
-  const cartTotalGP = useMemo(
-    () => cart.reduce((acc, e) => acc + e.intPrice * e.qty, 0),
-    [cart]
-  );
+  const breakdown = useMemo(() => computeCartBreakdown(cart, killCounts), [cart, killCounts]);
+  const cartGroups = breakdown.groups;
+  const cartTotalGP = breakdown.totalGP;
   const ratesLive = liveRates.clpPerUsd != null && liveRates.eurPerUsd != null;
 
   const value: ShopState = {
     cart,
+    cartGroups,
     addToCart,
     addGearToCart,
     removeFromCart,
@@ -175,6 +297,13 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     setCurrency,
     liveRates,
     ratesLive,
+    rsn,
+    killCounts,
+    completedTaskIds,
+    killsStatus,
+    killsError,
+    lookupPlayer,
+    forgetKills,
     toast,
     toastMsg,
   };

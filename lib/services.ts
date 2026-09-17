@@ -1,20 +1,28 @@
+import finalDataRaw from "@/data/final_data.json";
 import type { ServiceGroup, ServiceItem } from "@/lib/types";
+import { countTaskPrice, getBossBaseGP } from "@/lib/pricing";
 
 /**
- * Central price/data source: github.com/PaJauKat/kat-data
- * combat_achivements.json (sic) is fetched at build/dev time.
+ * Catalogo central: data/final_data.json (datos completos de kat-data:
+ * combate achievements con type, kills, requirements...).
+ * La tienda usa este archivo local para no depender de red en build y para
+ * incluir el parametro `kills` de las tasks Kill Count.
  */
-const COMBAT_ACHIEVEMENTS_URL =
-  "https://raw.githubusercontent.com/PaJauKat/kat-data/main/combat_achivements.json";
 
 interface RawService {
   name: string;
   tier: string;
   monster: string;
+  type?: string | null;
   description: string | null;
-  /** Price in millions of GP (e.g. 12.5 = 12.5M). */
-  price: number;
+  /** Precio en millones de GP (puede ser null en tasks Kill Count). */
+  price: number | null;
+  kills?: number | null;
+  wiki_ca_id?: number | null;
+  also_completes?: string[] | null;
 }
+
+const finalData = finalDataRaw as RawService[];
 
 export function slugify(input: string): string {
   return input
@@ -46,42 +54,50 @@ function stableId(monster: string, name: string): string {
   return `${slugify(monster)}--${slugify(name)}`;
 }
 
-async function fetchCombatAchievements(): Promise<RawService[]> {
-  const res = await fetch(COMBAT_ACHIEVEMENTS_URL, { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error(
-      `Failed to load combat achievements from kat-data (HTTP ${res.status})`
-    );
-  }
-  return (await res.json()) as RawService[];
+function isCount(s: RawService): boolean {
+  return (
+    (s.type === "Kill Count" || s.type === "Stamina" || s.type === "Speed") &&
+    s.kills != null &&
+    s.kills > 0
+  );
+}
+
+function staticIntPrice(s: RawService): number {
+  return s.price != null ? toGp(s.price) : 0;
+}
+
+/**
+ * Precio "full" de una task count (Kill Count / Stamina) sin descontar
+ * hiscore: base del boss x kills que pide. Si el boss no tiene base en
+ * bosses-prices.json se usa el precio estatico de final_data.json.
+ */
+export function countTaskFullPrice(s: RawService): number {
+  return countTaskPrice(s.monster, s.type, s.kills, 0) ?? staticIntPrice(s);
 }
 
 export const services: ServiceItem[] = [];
 export const groups: ServiceGroup[] = [];
 
-let catalogPromise: Promise<RawService[]> | null = null;
-
-function loadRaw(): Promise<RawService[]> {
-  catalogPromise ??= fetchCombatAchievements().catch((err) => {
-    catalogPromise = null;
-    throw err;
+export async function initCatalog(): Promise<void> {
+  const items: ServiceItem[] = finalData.map((s) => {
+    const dynamicPrice = isCount(s) && getBossBaseGP(s.monster) > 0;
+    const intPrice = dynamicPrice ? countTaskFullPrice(s) : staticIntPrice(s);
+    return {
+      id: stableId(s.monster, s.name),
+      menu: "Combat Achievement",
+      option: s.monster,
+      content: s.tier,
+      text: s.name,
+      description: s.description,
+      priceLabel: formatIntPrice(intPrice),
+      intPrice,
+      type: s.type,
+      kills: s.kills,
+      wikiCaId: s.wiki_ca_id,
+      alsoCompletes: s.also_completes,
+      dynamicPrice,
+    };
   });
-  return catalogPromise;
-}
-
-export async function initCatalog() {
-  const raw = await loadRaw();
-
-  const items: ServiceItem[] = raw.map((s) => ({
-    id: stableId(s.monster, s.name),
-    menu: "Combat Achievement",
-    option: s.monster,
-    content: s.tier,
-    text: s.name,
-    description: s.description,
-    priceLabel: formatIntPrice(toGp(s.price)),
-    intPrice: toGp(s.price),
-  }));
 
   const map = new Map<string, ServiceItem[]>();
   for (const item of items) {

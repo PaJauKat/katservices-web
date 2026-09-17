@@ -115,10 +115,17 @@ export default function CombatAchievementsViewer({ items }: { items: ServiceItem
 
         {(query || monster || onlyOthers) && (
           <button className="ca-clear" onClick={reset}>
-            Reset
+            Clear
           </button>
         )}
       </div>
+
+      {(query || monster || onlyOthers) && (
+        <button className="ca-clear-back" onClick={reset}>
+          <span aria-hidden="true">←</span>
+          Back to all services
+        </button>
+      )}
 
       {browseMode ? (
         <>
@@ -132,7 +139,7 @@ export default function CombatAchievementsViewer({ items }: { items: ServiceItem
                   onClick={() => selectMonster(m.name)}
                 >
                   {img ? (
-                    <Image src={img} alt="" width={44} height={44} className="ca-monster-img" />
+                    <Image src={img} alt="" width={64} height={64} className="ca-monster-img" />
                   ) : (
                     <span className="ca-monster-emoji">⚔️</span>
                   )}
