@@ -7,8 +7,9 @@ import { countTaskLabel, countTaskPrice } from "@/lib/pricing";
 import type { ServiceItem } from "@/lib/types";
 
 export default function ServiceRow({ item }: { item: ServiceItem }) {
-  const { addToCart, toast, completedTaskIds, rsn, killCounts } = useShop();
+  const { addToCart, toast, completedTaskIds, rsn, killCounts, cart } = useShop();
   const completed = item.wikiCaId != null && completedTaskIds.has(item.wikiCaId);
+  const inCart = cart.some((e) => e.id === item.id);
 
   // Precio dinamico de una task count (Kill Count / Stamina) con las kills
   // del hiscore del cliente (solo descuenta en Kill Count).
@@ -38,11 +39,12 @@ export default function ServiceRow({ item }: { item: ServiceItem }) {
   };
 
   return (
-    <div className={`service-row${done ? " done" : ""}`}>
+    <div className={`service-row${done ? " done" : ""}${inCart ? " in-cart" : ""}`}>
       <div className="service-info">
         <div className="service-text">
           {item.text}
           {done && <span className="done-badge">✓ Completed</span>}
+          {inCart && !done && <span className="in-cart-badge">✓ In cart</span>}
           {item.dynamicPrice && item.kills ? (
             <span className="kc-chip kc-chip-row">
               {`${countTaskLabel(item)} · ${item.kills} kills${ownKills != null ? ` · have ${ownKills}` : ""}`}
@@ -66,8 +68,12 @@ export default function ServiceRow({ item }: { item: ServiceItem }) {
             <>{item.priceLabel} GP</>
           )}
         </div>
-        <button className="add-btn" onClick={handleAdd} disabled={done}>
-          {done ? "✓ Done" : "+ Add"}
+        <button
+          className={`add-btn${inCart ? " added" : ""}`}
+          onClick={handleAdd}
+          disabled={done || inCart}
+        >
+          {done ? "✓ Done" : inCart ? "✓ Added" : "+ Add"}
         </button>
       </div>
     </div>

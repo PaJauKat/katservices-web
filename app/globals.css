@@ -708,6 +708,19 @@ button {
 	font-weight: 700;
 	margin-left: 8px;
 }
+.in-cart-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 9px;
+	border-radius: 20px;
+	background: rgba(255, 209, 102, 0.1);
+	border: 1px solid rgba(255, 209, 102, 0.3);
+	color: var(--gold);
+	font-size: 0.68rem;
+	font-weight: 700;
+	margin-left: 8px;
+}
 .service-info {
 	min-width: 0;
 }
@@ -874,6 +887,13 @@ button {
 	cursor: not-allowed;
 	background: rgba(46, 213, 115, 0.08);
 	border-color: rgba(46, 213, 115, 0.2);
+	color: #7ddfa8;
+}
+.add-btn.added {
+	opacity: 1;
+	cursor: default;
+	background: rgba(46, 213, 115, 0.12);
+	border-color: rgba(46, 213, 115, 0.35);
 	color: #7ddfa8;
 }
 
