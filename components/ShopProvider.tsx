@@ -81,8 +81,9 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [currency, setCurrencyState] = useState<CurrencyCode>("GP");
   const [liveRates, setLiveRates] = useState<LiveRates>({
-    clpPerUsd: null,
-    eurPerUsd: null,
+    usdPerMillion: null,
+    clpPerMillion: null,
+    eurPerMillion: null,
   });
   const [toastMsg, setToastMsg] = useState<React.ReactNode>("");
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -278,7 +279,10 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
   const breakdown = useMemo(() => computeCartBreakdown(cart, killCounts), [cart, killCounts]);
   const cartGroups = breakdown.groups;
   const cartTotalGP = breakdown.totalGP;
-  const ratesLive = liveRates.clpPerUsd != null && liveRates.eurPerUsd != null;
+  const ratesLive =
+    liveRates.usdPerMillion != null &&
+    liveRates.clpPerMillion != null &&
+    liveRates.eurPerMillion != null;
 
   const value: ShopState = {
     cart,

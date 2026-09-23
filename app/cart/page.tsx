@@ -93,7 +93,7 @@ export default function CartPage() {
             {currency !== "GP" && (
               <p className="rates-hint">
                 {ratesLive
-                  ? "Live FX rate via exchange-api."
+                  ? "Live rate via kat-data."
                   : "Approximate conversion (offline rates)."}{" "}
                 GP display: {formatCurrency(cartTotalGP, "GP")}
               </p>

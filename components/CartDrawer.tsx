@@ -62,7 +62,7 @@ export default function CartDrawer() {
               <CurrencySelector />
               {currency !== "GP" && (
                 <p className="rates-hint">
-                  {ratesLive ? "Live FX rate via exchange-api." : "Approximate conversion (offline rates)."}{" "}
+                  {ratesLive ? "Live rate via kat-data." : "Approximate conversion (offline rates)."}{" "}
                   GP display: {formatCurrency(cartTotalGP, "GP")}
                 </p>
               )}

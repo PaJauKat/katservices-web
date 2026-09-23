@@ -5,59 +5,68 @@ import type { CurrencyCode } from "@/lib/types";
  * Prices in the catalog are stored in OSRS GP (integer amounts).
  *
  * `perMillion` is how many units of each currency a single 1M GP is worth.
- * These are editable defaults; when live FX rates can be fetched, the app
- * will override CLP/EUR based on the USD value.
+ * These are editable fallbacks; the live values are fetched from the
+ * kat-data repo (exchange_rate file) and override them once loaded.
  */
 export const EXCHANGE = {
   perMillion: {
-    USD: 0.04,
-    CLP: 41.0,
-    EUR: 0.034,
+    USD: 0.18,
+    CLP: 170,
+    EUR: 0.15,
   } as Record<Exclude<CurrencyCode, "GP">, number>,
 };
 
-/** @see https://github.com/fawazahmed0/exchange-api */
-const FX_API = "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json";
+/** @see https://github.com/PaJauKat/kat-data/blob/main/exchange_rate */
+const RATE_URL = "https://raw.githubusercontent.com/PaJauKat/kat-data/main/exchange_rate";
 
 export interface LiveRates {
-  clpPerUsd: number | null;
-  eurPerUsd: number | null;
+  usdPerMillion: number | null;
+  clpPerMillion: number | null;
+  eurPerMillion: number | null;
+}
+
+function parseRateFile(raw: string): LiveRates {
+  const out: LiveRates = { usdPerMillion: null, clpPerMillion: null, eurPerMillion: null };
+  for (const line of raw.split(/\r?\n/)) {
+    const idx = line.indexOf("=");
+    if (idx === -1) continue;
+    const key = line.slice(0, idx).trim().toLowerCase();
+    const value = Number(line.slice(idx + 1).trim().replace(",", "."));
+    if (!Number.isFinite(value) || value <= 0) continue;
+    if (key === "usd") out.usdPerMillion = value;
+    else if (key === "clp") out.clpPerMillion = value;
+    else if (key === "eur") out.eurPerMillion = value;
+  }
+  return out;
 }
 
 export async function fetchLiveRates(): Promise<LiveRates> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000);
-    const res = await fetch(FX_API, { signal: controller.signal, cache: "no-store" });
+    const res = await fetch(`${RATE_URL}?t=${Date.now()}`, {
+      signal: controller.signal,
+      cache: "no-store",
+    });
     clearTimeout(timer);
-    if (!res.ok) throw new Error("bad fx response");
-    const data = (await res.json()) as { usd?: { clp?: number; eur?: number } };
-    return {
-      clpPerUsd: typeof data.usd?.clp === "number" ? data.usd.clp : null,
-      eurPerUsd: typeof data.usd?.eur === "number" ? data.usd.eur : null,
-    };
+    if (!res.ok) throw new Error("bad rate response");
+    return parseRateFile(await res.text());
   } catch {
-    return { clpPerUsd: null, eurPerUsd: null };
+    return { usdPerMillion: null, clpPerMillion: null, eurPerMillion: null };
   }
 }
 
+const LIVE_KEY = {
+  USD: "usdPerMillion",
+  CLP: "clpPerMillion",
+  EUR: "eurPerMillion",
+} as const;
+
 export function gpToCurrency(gp: number, currency: CurrencyCode, live?: LiveRates): number {
+  if (currency === "GP") return gp;
   const gpInMillions = gp / 1_000_000;
-
-  if (currency === "GP") {
-    return gp;
-  }
-
-  if (currency === "USD") {
-    return gpInMillions * EXCHANGE.perMillion.USD;
-  }
-
-  const rateKey = currency === "CLP" ? "clpPerUsd" : "eurPerUsd";
-  if (live?.[rateKey] != null) {
-    const usdValue = gpInMillions * EXCHANGE.perMillion.USD;
-    return usdValue * (live[rateKey] as number);
-  }
-
+  const liveValue = live?.[LIVE_KEY[currency]] ?? null;
+  if (liveValue != null) return gpInMillions * liveValue;
   return gpInMillions * EXCHANGE.perMillion[currency];
 }
 

@@ -7,7 +7,7 @@ import { countTaskLabel, countTaskPrice } from "@/lib/pricing";
 import type { ServiceItem } from "@/lib/types";
 
 export default function ServiceRow({ item }: { item: ServiceItem }) {
-  const { addToCart, toast, completedTaskIds, rsn, killCounts, cart } = useShop();
+  const { addToCart, removeFromCart, toast, completedTaskIds, rsn, killCounts, cart } = useShop();
   const completed = item.wikiCaId != null && completedTaskIds.has(item.wikiCaId);
   const inCart = cart.some((e) => e.id === item.id);
 
@@ -24,6 +24,15 @@ export default function ServiceRow({ item }: { item: ServiceItem }) {
   const done = completed || hiscoreDone;
 
   const handleAdd = () => {
+    if (inCart) {
+      removeFromCart(item.id);
+      toast(
+        <>
+          Removed from cart: <span className="accent">{item.text}</span>
+        </>
+      );
+      return;
+    }
     const added = addToCart(item);
     toast(
       added ? (
@@ -71,7 +80,7 @@ export default function ServiceRow({ item }: { item: ServiceItem }) {
         <button
           className={`add-btn${inCart ? " added" : ""}`}
           onClick={handleAdd}
-          disabled={done || inCart}
+          disabled={done}
         >
           {done ? "✓ Done" : inCart ? "✓ Added" : "+ Add"}
         </button>

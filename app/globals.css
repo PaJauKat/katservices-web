@@ -891,10 +891,18 @@ button {
 }
 .add-btn.added {
 	opacity: 1;
-	cursor: default;
 	background: rgba(46, 213, 115, 0.12);
 	border-color: rgba(46, 213, 115, 0.35);
 	color: #7ddfa8;
+}
+.add-btn.added:hover {
+	background: rgba(46, 213, 115, 0.22);
+	transform: none;
+}
+.add-btn.added:active {
+	background: rgba(255, 92, 92, 0.18);
+	border-color: rgba(255, 92, 92, 0.35);
+	color: #ff8f8f;
 }
 
 /* Featured gear */
