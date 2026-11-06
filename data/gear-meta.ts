@@ -107,6 +107,5 @@ export const gearMeta: Record<string, GearMeta> = {
       "Yellow Keris recommended (available without for +20M)",
       "Osmumten's fang to apply the cursed phalanx",
     ],
-    featured: false,
   },
 };
