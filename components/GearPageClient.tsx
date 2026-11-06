@@ -95,7 +95,9 @@ export default function GearPageClient({ item }: { item: GearItem }) {
           )}
         </div>
         <div>
-          <div className="header-badge">FEATURED GEAR</div>
+          <div className="header-badge">
+            {item.featured === false ? "SERVICE" : "FEATURED GEAR"}
+          </div>
           <h1 className="gear-title">{item.name}</h1>
           <p className="gear-tagline">{item.tagline}</p>
         </div>
