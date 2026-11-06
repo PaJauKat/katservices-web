@@ -115,7 +115,7 @@ export default async function HomePage() {
         </div>
 
         <div className="gear-featured-grid">
-          {gearItems.map((g) => (
+          {gearItems.filter((g) => g.featured !== false).map((g) => (
             <Link key={g.slug} href={`/gear/${g.slug}`} className="gear-feature-card">
               <div className="gear-feature-art">
                 <div className="gear-feature-glow"></div>

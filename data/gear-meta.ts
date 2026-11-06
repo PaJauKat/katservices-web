@@ -13,6 +13,8 @@ export interface GearMeta {
   description: string;
   requirements: string[];
   references?: GearImage[];
+  /** When false, the item keeps its page but is hidden from the home featured grid. */
+  featured?: boolean;
 }
 
 export const gearMeta: Record<string, GearMeta> = {
@@ -91,5 +93,20 @@ export const gearMeta: Record<string, GearMeta> = {
       "82 Magic", 
       "Purging staff"
     ],
+  },
+  "osmumtens-fang-or": {
+    slug: "osmumtens-fang-or",
+    icon: "/images/icons/Osmumten's_fang.png",
+    image: "/images/products/fang500.webp",
+    tagline: "The cursed phalanx fang",
+    description:
+      "Complete the Tombs of Amascut at raid level 500 or above with zero deaths until the cursed phalanx drops, then apply it to your Osmumten's fang. Base price assumes max gear with Tumeken's Shadow and a yellow Keris.",
+    requirements: [
+      "Beneath Cursed Sands quest",
+      "Tumeken's Shadow for max gear (Bowfa available for +20M)",
+      "Yellow Keris recommended (available without for +20M)",
+      "Osmumten's fang to apply the cursed phalanx",
+    ],
+    featured: false,
   },
 };

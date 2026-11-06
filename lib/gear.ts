@@ -85,6 +85,7 @@ export async function initGear() {
       name: r.Item,
       icon: meta?.icon ?? "⚔️",
       image: meta?.image,
+      featured: meta?.featured !== false,
       references: meta?.references,
       tagline: meta?.tagline ?? r.Item,
       description: meta?.description ?? `We deliver ${r.Item} with a complete, clean run.`,

@@ -21,6 +21,8 @@ export interface GearItem {
   slug: string;
   name: string;
   icon: string;
+  /** When false, the item keeps its page but is hidden from the home featured grid. */
+  featured?: boolean;
   /** Product icon: the item render or boss image from public/images/products */
   image?: string;
   /** Reference screenshots of gear setups, shown in a gallery under the modifiers */
